@@ -1,4 +1,4 @@
-fastmcp
+mcp==1.9.0
 matplotlib
 numpy
 starlette
