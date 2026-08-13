@@ -293,7 +293,7 @@ app = Starlette(routes=[
     Route("/", root_page),
     Route("/health", health_check),
     Mount("/static", StaticFiles(directory=STATIC_DIR), name="static"),  # ✅ 图片URL托管
-    Mount("/sse", app=mcp.sse_app()),                                   # ✅ SSE 独立挂载
+    Mount("/", app=mcp.sse_app()),                                   # ✅ SSE 独立挂载
 ])
 
 if __name__ == "__main__":
