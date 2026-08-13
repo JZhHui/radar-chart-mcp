@@ -3,3 +3,7 @@ matplotlib
 numpy
 starlette
 uvicorn
+scipy
+aiofiles
+pydantic
+Pillow
