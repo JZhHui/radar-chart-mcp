@@ -263,7 +263,7 @@ async def draw_career_radar_chart(
 def analyze_career_path(
     current_role: str,
     target_role: str,
-    abilities: List[Dict[str, any]]
+    abilities: List[Dict[str, Any]]
 ) -> str:
     """分析当前岗位到目标岗位的能力差距"""
     ROLE_REQUIREMENTS = {
