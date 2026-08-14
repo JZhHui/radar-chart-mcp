@@ -4,7 +4,8 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime
-from typing import List
+from typing import List,Any,Dict
+
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
@@ -91,6 +92,14 @@ def smooth_polar_data(angles, scores, num_points=300):
 
 def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_font):
     """纯同步绘图函数，在线程池中执行，不阻塞异步事件循环"""
+    # ✅ 加默认值，防止变量未定义
+    line_color = '#4F46E5'
+    fill_color = '#6366F1'
+
+    # ✅ 健壮性检查
+    if not categories or not scores or len(categories) == 0:
+        raise ValueError("categories 和 scores 不能为空")
+
     N = len(categories)
     angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
     angles_smooth, scores_smooth = smooth_polar_data(np.array(angles), np.array(scores))
@@ -98,10 +107,13 @@ def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_fon
     avg = sum(scores) / len(scores)
     if avg >= 80:
         line_color = '#10B981'  # 绿色（优秀）
+        fill_color = '#10B981'
     elif avg >= 60:
-        line_color = "#5C77DA"  # 紫色（良好）
+        line_color = '#4F46E5'  # 紫色（良好）
+        fill_color = '#6366F1'
     else:
-        line_color = "#DAA64B"
+        line_color = '#F59E0B'  # 橙色（待提升）
+        fill_color = '#FBBF24'
 
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
     fig.patch.set_facecolor('white')
@@ -145,11 +157,11 @@ class AbilityItem(BaseModel):
 
 # ==================== MCP Server 定义 ====================
 mcp = FastMCP("CareerRadarMCP")
-
+_ = setup_chinese_font()
 
 @mcp.tool()
 async def draw_career_radar_chart(
-    abilities: List[AbilityItem],
+    abilities: List[Dict[str, Any]],  # 改成 Dict，兼容性最好
     user_name: str = "用户",
     chart_title: str = "职业能力雷达图"
 ) -> str:
@@ -170,18 +182,21 @@ async def draw_career_radar_chart(
     if len(abilities) < 3:
         return "❌ 参数错误：请至少提供 3 个能力维度（建议 6 项）"
 
-    categories = [a.name for a in abilities]
-    scores = [a.score for a in abilities]
+    # 兼容 Dict 格式
+    categories = [a.get("name", f"维度{i + 1}") for i, a in enumerate(abilities)]
+    scores = [min(100, max(0, a.get("score", 0))) for a in abilities]
     chinese_font = setup_chinese_font()
 
     # ✅ 核心：绘图放入线程池，不阻塞 Starlette 异步事件循环
-    loop = asyncio.get_running_loop()
-    image_bytes = await loop.run_in_executor(
-        _plot_executor,
-        _generate_radar_sync,
-        categories, scores, user_name, chart_title, chinese_font
-    )
-
+    try:
+        loop = asyncio.get_running_loop()
+        image_bytes = await loop.run_in_executor(
+            _plot_executor,
+            _generate_radar_sync,
+            categories, scores, user_name, chart_title, chinese_font
+        )
+    except Exception as e:
+        return f"❌ 图片生成失败: {str(e)}"
     # ✅ 以内容哈希命名，相同数据命中缓存，避免重复生成
     content_hash = hashlib.md5(image_bytes).hexdigest()[:12]
     filename = f"radar_{content_hash}.jpg"
@@ -248,7 +263,7 @@ async def draw_career_radar_chart(
 def analyze_career_path(
     current_role: str,
     target_role: str,
-    abilities: List[AbilityItem]
+    abilities: List[Dict[str, any]]
 ) -> str:
     """分析当前岗位到目标岗位的能力差距"""
     ROLE_REQUIREMENTS = {
@@ -263,7 +278,7 @@ def analyze_career_path(
     if not req:
         return f"❌ 暂不支持'{target_role}'，目前支持: {', '.join(ROLE_REQUIREMENTS.keys())}"
 
-    current_map = {a.name: a.score for a in abilities}
+    current_map = {a.get("name", ""): a.get("score", 0) for a in abilities}
     gaps = sorted(
         [(skill, req[skill] - current_map.get(skill, 0), req[skill], current_map.get(skill, 0))
          for skill in req if req[skill] - current_map.get(skill, 0) > 0],
