@@ -5,7 +5,6 @@ import hashlib
 import json
 from datetime import datetime
 from typing import List,Any,Dict
-
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
@@ -45,9 +44,27 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 _plot_executor = ThreadPoolExecutor(max_workers=2)
 
 # ==================== 字体与工具函数 ====================
+FONT_PATH = os.path.join(os.path.dirname(__file__), "AlibabaPuHuiTi-3-55-Regular.ttf")
+
+
 @lru_cache(maxsize=1)
 def setup_chinese_font():
-    """不设置任何字体，使用 matplotlib 默认"""
+    """加载本地中文字体"""
+    if os.path.exists(FONT_PATH):
+        try:
+            from matplotlib import font_manager
+            font_manager.fontManager.addfont(FONT_PATH)
+            prop = FontProperties(fname=FONT_PATH)
+            plt.rcParams['font.family'] = prop.get_name()
+            plt.rcParams['axes.unicode_minus'] = False
+            print(f"[INFO] 字体加载成功: {prop.get_name()}")
+            return prop
+        except Exception as e:
+            print(f"[WARN] 字体加载失败: {e}")
+
+    # 回退
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    plt.rcParams['axes.unicode_minus'] = False
     return None
 
 def smooth_polar_data(angles, scores, num_points=300):
@@ -64,7 +81,7 @@ def smooth_polar_data(angles, scores, num_points=300):
 
 
 def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_font):
-    """纯同步绘图函数，在线程池中执行"""
+    """纯同步绘图函数"""
     line_color = '#4F46E5'
     fill_color = '#6366F1'
 
@@ -95,21 +112,22 @@ def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_fon
     ax.scatter(angles, scores, color=line_color, s=80, zorder=5)
 
     ax.set_xticks(angles)
-    # ✅ 删除 fontproperties，用默认字体
-    ax.set_xticklabels(categories, fontsize=13)
     ax.set_ylim(0, 100)
     ax.set_yticks([20, 40, 60, 80, 100])
     ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=9, color='#9CA3AF')
     ax.grid(True, linestyle='--', alpha=0.5, color='#D1D5DB')
 
-    # ✅ 删除 fontproperties
+    # ✅ 恢复 fontproperties，使用传入的中文字体
+    fp = {'fontproperties': chinese_font} if chinese_font is not None else {}
+
+    ax.set_xticklabels(categories, fontsize=13, **fp)
     ax.set_title(f"{user_name} - {chart_title}", fontsize=17, fontweight='bold', pad=25,
-                 color='#111827')
+                 color='#111827', **fp)
 
     for angle, score in zip(angles, scores):
         offset = 10 if score < 92 else -14
         ax.text(angle, score + offset, str(int(score)), ha='center', va='center',
-                fontsize=11, fontweight='bold', color='#1F2937')
+                fontsize=11, fontweight='bold', color='#1F2937', **fp)
 
     buf = io.BytesIO()
     plt.savefig(buf, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
