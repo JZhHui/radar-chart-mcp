@@ -47,20 +47,8 @@ _plot_executor = ThreadPoolExecutor(max_workers=2)
 # ==================== 字体与工具函数 ====================
 @lru_cache(maxsize=1)
 def setup_chinese_font():
-    """懒加载 + 缓存中文字体"""
-    if not os.path.exists(FONT_PATH):
-        import urllib.request
-        urls = [
-            "https://cdn.jsdelivr.net/gh/googlefonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansSC-Regular.otf",
-            "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansSC-Regular.otf",
-        ]
-        for url in urls:
-            try:
-                urllib.request.urlretrieve(url, FONT_PATH)
-                break
-            except Exception:
-                continue
-
+    """懒加载 + 缓存中文字体，优先使用系统自带"""
+    # 1. 先尝试下载的字体
     if os.path.exists(FONT_PATH):
         try:
             from matplotlib import font_manager
@@ -70,12 +58,30 @@ def setup_chinese_font():
             plt.rcParams['axes.unicode_minus'] = False
             return prop
         except Exception as e:
-            print(f"[WARN] 字体加载失败: {e}")
+            print(f"[WARN] 下载字体加载失败: {e}")
 
+    # 2. ✅ 查找系统自带中文字体（Railway 容器可能自带）
+    try:
+        from matplotlib import font_manager
+        system_fonts = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
+        for font_path in system_fonts:
+            try:
+                prop = FontProperties(fname=font_path)
+                name = prop.get_name()
+                if any(k in name for k in ['CJK', 'Noto', 'SimHei', 'WenQuanYi', 'Source Han', 'Droid Sans Fallback', 'AR PL', 'Heiti', 'Songti']):
+                    plt.rcParams['font.family'] = name
+                    plt.rcParams['axes.unicode_minus'] = False
+                    print(f"[INFO] 使用系统字体: {name}")
+                    return prop
+            except:
+                continue
+    except Exception as e:
+        print(f"[WARN] 系统字体查找失败: {e}")
+
+    # 3. 回退
     plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'SimHei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False
     return None
-
 
 def smooth_polar_data(angles, scores, num_points=300):
     """周期性边界条件的贝塞尔平滑，避免首尾折角"""
@@ -92,57 +98,58 @@ def smooth_polar_data(angles, scores, num_points=300):
 
 def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_font):
     """纯同步绘图函数，在线程池中执行，不阻塞异步事件循环"""
-    # ✅ 加默认值，防止变量未定义
     line_color = '#4F46E5'
     fill_color = '#6366F1'
 
-    # ✅ 健壮性检查
     if not categories or not scores or len(categories) == 0:
         raise ValueError("categories 和 scores 不能为空")
 
     N = len(categories)
     angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
-    angles_smooth, scores_smooth = smooth_polar_data(np.array(angles), np.array(scores))
+    scores_closed = scores + scores[:1]
+    angles_closed = angles + angles[:1]
 
     avg = sum(scores) / len(scores)
     if avg >= 80:
-        line_color = '#10B981'  # 绿色（优秀）
+        line_color = '#10B981'
         fill_color = '#10B981'
     elif avg >= 60:
-        line_color = '#4F46E5'  # 紫色（良好）
+        line_color = '#4F46E5'
         fill_color = '#6366F1'
     else:
-        line_color = '#F59E0B'  # 橙色（待提升）
+        line_color = '#F59E0B'
         fill_color = '#FBBF24'
 
     fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
     fig.patch.set_facecolor('white')
 
-    ax.fill(angles_smooth, scores_smooth, color=fill_color, alpha=0.2)
-    ax.plot(angles_smooth, scores_smooth, color=line_color, linewidth=3)
+    ax.fill(angles_closed, scores_closed, color=fill_color, alpha=0.25)
+    ax.plot(angles_closed, scores_closed, color=line_color, linewidth=3, marker='o', markersize=10)
     ax.scatter(angles, scores, color=line_color, s=80, zorder=5)
 
     ax.set_xticks(angles)
-    ax.set_xticklabels(categories, fontsize=13, fontproperties=chinese_font)
     ax.set_ylim(0, 100)
     ax.set_yticks([20, 40, 60, 80, 100])
     ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=9, color='#9CA3AF')
     ax.grid(True, linestyle='--', alpha=0.5, color='#D1D5DB')
 
+    # ✅ 关键修复：如果 chinese_font 为 None，不传 fontproperties，让 matplotlib 用 rcParams 回退
+    fp = {'fontproperties': chinese_font} if chinese_font is not None else {}
+
+    ax.set_xticklabels(categories, fontsize=13, **fp)
     ax.set_title(f"{user_name} - {chart_title}", fontsize=17, fontweight='bold', pad=25,
-                 fontproperties=chinese_font, color='#111827')
+                 color='#111827', **fp)
 
     for angle, score in zip(angles, scores):
         offset = 10 if score < 92 else -14
         ax.text(angle, score + offset, str(int(score)), ha='center', va='center',
-                fontsize=11, fontweight='bold', color='#1F2937', fontproperties=chinese_font)
+                fontsize=11, fontweight='bold', color='#1F2937', **fp)
 
     buf = io.BytesIO()
     plt.savefig(buf, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     buf.seek(0)
 
-    # Pillow 二次压缩 JPEG
     img = Image.open(buf).convert('RGB')
     compressed = io.BytesIO()
     img.save(compressed, format='JPEG', quality=75, optimize=True)
