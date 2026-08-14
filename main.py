@@ -47,40 +47,7 @@ _plot_executor = ThreadPoolExecutor(max_workers=2)
 # ==================== 字体与工具函数 ====================
 @lru_cache(maxsize=1)
 def setup_chinese_font():
-    """懒加载 + 缓存中文字体，优先使用系统自带"""
-    # 1. 先尝试下载的字体
-    if os.path.exists(FONT_PATH):
-        try:
-            from matplotlib import font_manager
-            font_manager.fontManager.addfont(FONT_PATH)
-            prop = FontProperties(fname=FONT_PATH)
-            plt.rcParams['font.family'] = prop.get_name()
-            plt.rcParams['axes.unicode_minus'] = False
-            return prop
-        except Exception as e:
-            print(f"[WARN] 下载字体加载失败: {e}")
-
-    # 2. ✅ 查找系统自带中文字体（Railway 容器可能自带）
-    try:
-        from matplotlib import font_manager
-        system_fonts = font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
-        for font_path in system_fonts:
-            try:
-                prop = FontProperties(fname=font_path)
-                name = prop.get_name()
-                if any(k in name for k in ['CJK', 'Noto', 'SimHei', 'WenQuanYi', 'Source Han', 'Droid Sans Fallback', 'AR PL', 'Heiti', 'Songti']):
-                    plt.rcParams['font.family'] = name
-                    plt.rcParams['axes.unicode_minus'] = False
-                    print(f"[INFO] 使用系统字体: {name}")
-                    return prop
-            except:
-                continue
-    except Exception as e:
-        print(f"[WARN] 系统字体查找失败: {e}")
-
-    # 3. 回退
-    plt.rcParams['font.sans-serif'] = ['Noto Sans CJK SC', 'SimHei', 'WenQuanYi Micro Hei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False
+    """不设置任何字体，使用 matplotlib 默认"""
     return None
 
 def smooth_polar_data(angles, scores, num_points=300):
@@ -97,7 +64,7 @@ def smooth_polar_data(angles, scores, num_points=300):
 
 
 def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_font):
-    """纯同步绘图函数，在线程池中执行，不阻塞异步事件循环"""
+    """纯同步绘图函数，在线程池中执行"""
     line_color = '#4F46E5'
     fill_color = '#6366F1'
 
@@ -128,22 +95,21 @@ def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_fon
     ax.scatter(angles, scores, color=line_color, s=80, zorder=5)
 
     ax.set_xticks(angles)
+    # ✅ 删除 fontproperties，用默认字体
+    ax.set_xticklabels(categories, fontsize=13)
     ax.set_ylim(0, 100)
     ax.set_yticks([20, 40, 60, 80, 100])
     ax.set_yticklabels(['20', '40', '60', '80', '100'], fontsize=9, color='#9CA3AF')
     ax.grid(True, linestyle='--', alpha=0.5, color='#D1D5DB')
 
-    # ✅ 关键修复：如果 chinese_font 为 None，不传 fontproperties，让 matplotlib 用 rcParams 回退
-    fp = {'fontproperties': chinese_font} if chinese_font is not None else {}
-
-    ax.set_xticklabels(categories, fontsize=13, **fp)
+    # ✅ 删除 fontproperties
     ax.set_title(f"{user_name} - {chart_title}", fontsize=17, fontweight='bold', pad=25,
-                 color='#111827', **fp)
+                 color='#111827')
 
     for angle, score in zip(angles, scores):
         offset = 10 if score < 92 else -14
         ax.text(angle, score + offset, str(int(score)), ha='center', va='center',
-                fontsize=11, fontweight='bold', color='#1F2937', **fp)
+                fontsize=11, fontweight='bold', color='#1F2937')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='jpg', dpi=100, bbox_inches='tight', facecolor='white')
@@ -154,7 +120,6 @@ def _generate_radar_sync(categories, scores, user_name, chart_title, chinese_fon
     compressed = io.BytesIO()
     img.save(compressed, format='JPEG', quality=75, optimize=True)
     return compressed.getvalue()
-
 
 # ==================== Pydantic 入参校验 ====================
 class AbilityItem(BaseModel):
